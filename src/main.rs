@@ -3,10 +3,13 @@ use axum::{
     routing::{get, post, put, delete},
     Router,
     http::StatusCode,
+    response::Html,
+    routing::get_service,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+use tower_http::services::ServeDir;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Book {
@@ -25,15 +28,28 @@ type SharedState = Arc<AppState>;
 #[tokio::main]
 async fn main() {
     let state = Arc::new(AppState::default());
+    let serve_dir = ServeDir::new("static");
+
     let app = Router::new()
         .route("/books", get(get_books).post(create_book))
         .route("/books/:id", get(get_book).put(update_book).delete(delete_book))
+        .route("/", get(show_index))
+        .nest_service("/static", get_service(serve_dir).handle_error(|error: std::io::Error| async move {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Unhandled internal error: {}", error),
+            )
+        }))
         .with_state(state);
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+async fn show_index() -> Html<&'static str> {
+    Html(include_str!("../static/index.html"))
 }
 
 async fn get_books(State(state): State<SharedState>) -> Json<Vec<Book>> {
